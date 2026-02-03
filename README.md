@@ -1,6 +1,6 @@
 # Langflow on IBM Cloud - Terraform Deployment
 
-Deploy Langflow (full-stack AI application) on IBM Cloud using Terraform with minimal cost configuration.
+Deploy Langflow on IBM Cloud using Terraform with a backend-only Code Engine app and minimal cost configuration.
 
 ## 🏗️ Architecture
 
@@ -11,15 +11,15 @@ Deploy Langflow (full-stack AI application) on IBM Cloud using Terraform with mi
 │  ┌────────────────────────────────────────────────┐    │
 │  │         Code Engine Project                     │    │
 │  │                                                  │    │
-│  │  ┌──────────────┐      ┌──────────────┐       │    │
-│  │  │   Frontend   │      │   Backend    │       │    │
-│  │  │  (0-1 inst)  │─────▶│  (0-1 inst)  │       │    │
-│  │  │  0.25 vCPU   │      │  0.5 vCPU    │       │    │
-│  │  │  0.5 GB RAM  │      │  1 GB RAM    │       │    │
-│  │  └──────────────┘      └──────┬───────┘       │    │
-│  │                                │                │    │
-│  └────────────────────────────────┼────────────────┘    │
-│                                   │                     │
+│  │         ┌──────────────┐                        │    │
+│  │         │   Langflow   │                        │    │
+│  │         │  (0-1 inst)  │                        │    │
+│  │         │  0.5 vCPU    │                        │    │
+│  │         │  1 GB RAM    │                        │    │
+│  │         └──────┬───────┘                        │    │
+│  │                │                                 │    │
+│  └────────────────┼────────────────────────────────┘    │
+│                   │                                     │
 │  ┌────────────────────────────────▼────────────────┐   │
 │  │     PostgreSQL Database (Minimal Config)        │   │
 │  │     - 1 GB Memory                               │   │
@@ -32,8 +32,7 @@ Deploy Langflow (full-stack AI application) on IBM Cloud using Terraform with mi
 
 ## 📋 Components
 
-- **Frontend**: Langflow UI (`langflowai/langflow-frontend:latest`)
-- **Backend**: Langflow API (`langflowai/langflow-backend:latest`)
+- **Application**: Langflow (`langflowai/langflow:1.7.3`)
 - **Database**: IBM Cloud Databases for PostgreSQL (minimal plan)
 - **Compute**: IBM Cloud Code Engine (serverless, scale-to-zero)
 
@@ -41,10 +40,9 @@ Deploy Langflow (full-stack AI application) on IBM Cloud using Terraform with mi
 
 | Service | Configuration | Monthly Cost |
 |---------|--------------|--------------|
-| Code Engine (Backend) | 0-1 instances, 0.5 vCPU, 1GB RAM | $0-5 |
-| Code Engine (Frontend) | 0-1 instances, 0.25 vCPU, 0.5GB RAM | $0-3 |
+| Code Engine (Langflow) | 0-1 instances, 0.5 vCPU, 1GB RAM | $0-5 |
 | PostgreSQL | Shared, 1GB RAM, 5GB disk | $30-50 |
-| **Total** | | **~$30-58/month** |
+| **Total** | | **~$30-55/month** |
 
 *Note: Code Engine charges only for actual usage with scale-to-zero enabled*
 
@@ -97,8 +95,6 @@ database_name        = "langflow-postgres"
 # Scaling configuration (already optimized for minimal cost)
 backend_min_scale    = 0
 backend_max_scale    = 1
-frontend_min_scale   = 0
-frontend_max_scale   = 1
 ```
 
 ## 🎯 Deployment Steps
@@ -130,9 +126,9 @@ Type `yes` when prompted to confirm the deployment.
 
 **⏱️ Deployment Time**: Approximately 15-20 minutes
 - PostgreSQL provisioning: ~10-15 minutes
-- Code Engine apps: ~2-5 minutes
+- Code Engine app: ~2-5 minutes
 
-Note: Liveness/readiness probes are configured via IBM Cloud CLI during apply (backend: `GET /health_check`; frontend: `GET /`), so your CLI session must be authenticated and the Code Engine plugin must be installed.
+Note: Liveness/readiness probes are configured via IBM Cloud CLI during apply (`GET /health_check`), so your CLI session must be authenticated and the Code Engine plugin must be installed.
 
 ### 4. Access Your Application
 
@@ -141,7 +137,6 @@ After successful deployment, Terraform will output:
 ```
 Outputs:
 
-frontend_url = "https://langflow-frontend.xxxxxx.us-south.codeengine.appdomain.cloud"
 backend_url = "https://langflow-backend.xxxxxx.us-south.codeengine.appdomain.cloud"
 
 access_instructions = <<EOT
@@ -149,8 +144,7 @@ access_instructions = <<EOT
 ║           Langflow Deployment Successful!                      ║
 ╚════════════════════════════════════════════════════════════════╝
 
-🌐 Frontend URL: https://langflow-frontend.xxxxxx...
-🔧 Backend API:  https://langflow-backend.xxxxxx...
+🌐 Langflow URL: https://langflow-backend.xxxxxx...
 ...
 EOT
 ```
@@ -159,7 +153,7 @@ EOT
 
 ### Accessing the Application
 
-1. Open the **Frontend URL** in your browser
+1. Open the **Langflow URL** in your browser
 2. Wait 10-30 seconds on first access (cold start from scale-to-zero)
 3. Configure Langflow settings as needed
 
@@ -169,7 +163,6 @@ EOT
 # Using IBM Cloud CLI
 ibmcloud ce project select --name langflow-project
 ibmcloud ce app logs --name langflow-backend
-ibmcloud ce app logs --name langflow-frontend
 ```
 
 Or via [IBM Cloud Console](https://cloud.ibm.com/codeengine/projects)
@@ -211,7 +204,7 @@ Notes:
 
 1. Go to [IBM Cloud Code Engine Console](https://cloud.ibm.com/codeengine/projects)
 2. Select your project
-3. Click on the application (backend or frontend)
+3. Click on the backend application
 4. Go to **Environment variables** tab
 5. Add or modify variables
 6. Save changes (app will automatically redeploy)
@@ -223,7 +216,6 @@ To adjust scaling limits, edit `terraform.tfvars`:
 ```hcl
 # Increase max instances for higher traffic
 backend_max_scale  = 3
-frontend_max_scale = 2
 ```
 
 Then apply changes:
@@ -263,8 +255,7 @@ terraform apply
 Edit `terraform/variables.tf` or `terraform.tfvars`:
 
 ```hcl
-backend_image  = "langflowai/langflow-backend:v1.2.3"
-frontend_image = "langflowai/langflow-frontend:v1.2.3"
+backend_image  = "langflowai/langflow:v1.7.3"
 ```
 
 Apply changes:
