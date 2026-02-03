@@ -54,6 +54,8 @@ Deploy Langflow (full-stack AI application) on IBM Cloud using Terraform with mi
 2. **IBM Cloud API Key** - [Create one here](https://cloud.ibm.com/iam/apikeys)
 3. **Terraform** (v1.0+) - [Install Terraform](https://www.terraform.io/downloads)
 4. **Git** (optional, for version control)
+5. **IBM Cloud CLI** - [Install the CLI](https://cloud.ibm.com/docs/cli?topic=cli-install-ibmcloud-cli)
+6. **IBM Cloud CLI Code Engine PLugin** [Install the Code Engine Plugin](https://cloud.ibm.com/docs/codeengine?topic=codeengine-cli)
 
 ### Creating an IBM Cloud API Key
 
@@ -130,6 +132,8 @@ Type `yes` when prompted to confirm the deployment.
 - PostgreSQL provisioning: ~10-15 minutes
 - Code Engine apps: ~2-5 minutes
 
+Note: Liveness/readiness probes are configured via IBM Cloud CLI during apply (backend: `GET /health_check`; frontend: `GET /`), so your CLI session must be authenticated and the Code Engine plugin must be installed.
+
 ### 4. Access Your Application
 
 After successful deployment, Terraform will output:
@@ -169,6 +173,39 @@ ibmcloud ce app logs --name langflow-frontend
 ```
 
 Or via [IBM Cloud Console](https://cloud.ibm.com/codeengine/projects)
+
+## 🧭 IBM Cloud CLI Basics (Login, Project Selection, Debugging)
+
+### 1) Login and target region
+
+```bash
+ibmcloud login --sso
+ibmcloud target -r us-south
+```
+
+### 2) Select your Code Engine project
+
+```bash
+ibmcloud ce project list
+ibmcloud ce project select --name langflow-project
+```
+
+### 3) Debugging a failing app
+
+```bash
+# App status/details
+ibmcloud ce application get --name langflow-backend
+
+# Logs (follow, include all containers)
+ibmcloud ce application logs --name langflow-backend --all-containers --follow
+
+# List instances (use with --instance to narrow logs)
+ibmcloud ce application get --name langflow-backend --output json
+```
+
+Notes:
+- `ibmcloud ce application logs` does **not** accept `--project`; select the project first.
+- If the app shows "Revision failed to start", logs will usually contain the exact error (missing env vars, image pull error, crash on boot).
 
 ### Updating Environment Variables
 
@@ -257,6 +294,14 @@ Type `yes` to confirm.
 ## 🐛 Troubleshooting
 
 ### Application Not Responding
+
+Setup:
+
+```bash
+ibmcloud login --sso
+ibmcloud target -g langflow-resources
+ibmcloud ce project select -n langflow-project
+```
 
 1. **Check application status**:
    ```bash

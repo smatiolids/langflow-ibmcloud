@@ -1,0 +1,232 @@
+# Resource group (created by Terraform)
+resource "ibm_resource_group" "group" {
+  name = var.resource_group_name
+}
+
+# Code Engine Project
+resource "ibm_code_engine_project" "langflow_project" {
+  name              = var.project_name
+  resource_group_id = ibm_resource_group.group.id
+}
+
+# Wait for Code Engine project to be fully ready
+resource "time_sleep" "wait_for_project" {
+  depends_on = [ibm_code_engine_project.langflow_project]
+
+  create_duration = "5m"
+}
+
+# PostgreSQL Database Instance
+resource "ibm_database" "postgresql" {
+  name              = var.database_name
+  plan              = var.database_plan
+  location          = var.region
+  service           = "databases-for-postgresql"
+  resource_group_id = ibm_resource_group.group.id
+  service_endpoints = var.database_service_endpoints
+  adminpassword     = var.database_password
+
+  # Minimal configuration for cost optimization
+  group {
+    group_id = "member"
+    memory {
+      allocation_mb = var.database_memory_mb
+    }
+    disk {
+      allocation_mb = var.database_disk_mb
+    }
+  }
+
+  # Backup configuration (minimal retention)
+  backup_id = null
+
+  tags = var.tags
+
+  # Wait for the database to be fully provisioned
+  timeouts {
+    create = "60m"
+    update = "60m"
+    delete = "30m"
+  }
+}
+
+# Wait for database to be ready
+resource "time_sleep" "wait_for_database" {
+  depends_on = [ibm_database.postgresql]
+
+  create_duration = "5m"
+}
+
+# Data source to get database connection details
+data "ibm_database_connection" "postgresql_connection" {
+  deployment_id = ibm_database.postgresql.id
+  user_id       = ibm_database.postgresql.adminuser
+  user_type     = "database"
+  endpoint_type = var.database_connection_endpoint_type
+
+  depends_on = [time_sleep.wait_for_database]
+}
+
+# Build database URL using database_user/database_password, with override support.
+locals {
+  postgres_url_raw = data.ibm_database_connection.postgresql_connection.postgres[0].composed[0]
+  postgres_password_effective = var.database_password != "" ? var.database_password : try(
+    data.ibm_database_connection.postgresql_connection.postgres[0].authentication[0].password,
+    ""
+  )
+  postgres_url_with_password = replace(
+    replace(local.postgres_url_raw, "$PASSWORD", local.postgres_password_effective),
+    "$${PASSWORD}",
+    local.postgres_password_effective
+  )
+  # Rebuild credentials section using user/password variables to avoid provider placeholders.
+  postgres_url_parts         = split("://", local.postgres_url_with_password)
+  postgres_url_scheme        = local.postgres_url_parts[0] == "postgres" ? "postgresql" : local.postgres_url_parts[0]
+  postgres_url_tail_parts    = split("@", local.postgres_url_parts[1])
+  postgres_url_host_and_path = join("@", slice(local.postgres_url_tail_parts, 1, length(local.postgres_url_tail_parts)))
+  postgres_url_with_user = format(
+    "%s://%s:%s@%s",
+    local.postgres_url_scheme,
+    urlencode(var.database_user),
+    urlencode(local.postgres_password_effective),
+    local.postgres_url_host_and_path
+  )
+  postgres_url_with_sslmode = replace(
+    local.postgres_url_with_user,
+    "sslmode=verify-full",
+    "sslmode=${var.database_sslmode}"
+  )
+  postgres_url_final = var.database_url_override != "" ? var.database_url_override : local.postgres_url_with_sslmode
+}
+
+# Code Engine Secret for Database Connection
+resource "ibm_code_engine_secret" "database_secret" {
+  project_id = ibm_code_engine_project.langflow_project.project_id
+  name       = "langflow-db-secret"
+  format     = "generic"
+
+  data = {
+    LANGFLOW_DATABASE_URL       = local.postgres_url_final
+    LANGFLOW_SECRET_KEY         = var.langflow_secret_key
+    LANGFLOW_SUPERUSER          = var.langflow_superuser
+    LANGFLOW_SUPERUSER_PASSWORD = var.langflow_superuser_password
+  }
+
+  depends_on = [data.ibm_database_connection.postgresql_connection]
+}
+
+# Backend Application
+resource "ibm_code_engine_app" "backend" {
+  project_id = ibm_code_engine_project.langflow_project.project_id
+  name       = "langflow-backend"
+
+  image_reference = var.backend_image
+  image_port      = var.backend_port
+
+  # Minimal scaling configuration
+  scale_min_instances = var.backend_min_scale
+  scale_max_instances = var.backend_max_scale
+
+  # Resource allocation
+  scale_cpu_limit    = var.backend_cpu
+  scale_memory_limit = var.backend_memory
+
+  # Environment variables from secret
+  run_env_variables {
+    type  = "literal"
+    name  = "LANGFLOW_CONFIG_DIR"
+    value = "/app/config"
+  }
+
+  run_env_variables {
+    type      = "secret_full_reference"
+    name      = "LANGFLOW_DATABASE_URL"
+    reference = ibm_code_engine_secret.database_secret.name
+  }
+
+  run_env_variables {
+    type      = "secret_full_reference"
+    name      = "LANGFLOW_SECRET_KEY"
+    reference = ibm_code_engine_secret.database_secret.name
+  }
+
+  run_env_variables {
+    type      = "secret_full_reference"
+    name      = "LANGFLOW_SUPERUSER"
+    reference = ibm_code_engine_secret.database_secret.name
+  }
+
+  run_env_variables {
+    type      = "secret_full_reference"
+    name      = "LANGFLOW_SUPERUSER_PASSWORD"
+    reference = ibm_code_engine_secret.database_secret.name
+  }
+
+  run_env_variables {
+    type  = "literal"
+    name  = "LANGFLOW_AUTO_LOGIN"
+    value = "false"
+  }
+
+  run_env_variables {
+    type  = "literal"
+    name  = "LANGFLOW_PORT"
+    value = tostring(var.backend_port)
+  }
+
+  # Code Engine app provisioning can exceed default 10m
+  timeouts {
+    create = "30m"
+    update = "30m"
+  }
+
+  depends_on = [
+    time_sleep.wait_for_project,
+    ibm_code_engine_secret.database_secret
+  ]
+}
+
+# Configure backend liveness/readiness probes via IBM Cloud CLI.
+# Terraform provider v1.87.3 does not expose probe settings on ibm_code_engine_app.
+resource "null_resource" "backend_health_check" {
+  triggers = {
+    app_name     = ibm_code_engine_app.backend.name
+    project_name = var.project_name
+    path         = var.backend_health_check_path
+    port         = tostring(var.backend_port)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      ibmcloud ce project select --name ${var.project_name}
+      ibmcloud ce application update --name ${ibm_code_engine_app.backend.name} \
+        --no-wait \
+        --probe-live type=http \
+        --probe-live path=${var.backend_health_check_path} \
+        --probe-live port=${var.backend_port} \
+        --probe-live timeout=10 \
+        --probe-live interval=60 \
+        --probe-live initial-delay=10 \
+        --probe-live failure-threshold=10 \
+        --probe-ready type=http \
+        --probe-ready path=${var.backend_health_check_path} \
+        --probe-ready port=${var.backend_port} \
+        --probe-ready timeout=10 \
+        --probe-ready interval=60 \
+        --probe-ready initial-delay=10 \
+        --probe-ready failure-threshold=10
+    EOT
+  }
+
+  depends_on = [ibm_code_engine_app.backend]
+}
+
+# Time sleep resource to allow for proper initialization
+resource "time_sleep" "wait_for_apps" {
+  depends_on = [
+    ibm_code_engine_app.backend,
+    null_resource.backend_health_check
+  ]
+
+  create_duration = "30s"
+}

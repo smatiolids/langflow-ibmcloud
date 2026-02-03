@@ -1,0 +1,47 @@
+# IBM Cloud API Key (Required)
+# Get your API key from: https://cloud.ibm.com/iam/apikeys
+ibmcloud_api_key = "your-ibm-cloud-api-key-here"
+
+# Region Configuration
+region = "us-south"
+
+# Resource Group
+# This resource group must already exist in your IBM Cloud account
+resource_group_name = "langflow-resources"
+
+# Project and Database Names
+project_name  = "langflow-project"
+database_name = "langflow-postgres"
+langflow_secret_key = ""
+langflow_superuser = ""
+langflow_superuser_password = ""
+database_url_override = ""
+database_user = "admin"
+database_password = ""
+database_sslmode = "require"
+database_service_endpoints = "private"
+database_connection_endpoint_type = "private"
+
+# Docker Images
+backend_image = "langflowai/langflow:1.7.3"
+backend_health_check_path = "/health_check"
+
+# Scaling Configuration (Cost-Optimized Defaults)
+# Min scale of 0 enables scale-to-zero for cost savings
+backend_min_scale  = 0
+backend_max_scale  = 1
+
+# Resource Allocation
+backend_cpu       = "0.5"   # vCPU
+backend_memory    = "1G"    # RAM
+
+# Database Configuration (Minimal for Cost Optimization)
+database_plan      = "standard"
+database_memory_mb = 1024  # 1 GB (minimum)
+database_disk_mb   = 5120  # 5 GB (minimum)
+
+# Application Ports
+backend_port = 7860
+
+# Tags
+tags = ["langflow", "terraform", "production"]
