@@ -49,6 +49,13 @@ variable "langflow_superuser_password" {
   default     = ""
 }
 
+variable "astra_db_application_token" {
+  description = "Astra DB application token"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "database_url_override" {
   description = "Optional: full PostgreSQL URL to use instead of provider-composed URL"
   type        = string

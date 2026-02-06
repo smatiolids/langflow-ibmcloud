@@ -163,6 +163,7 @@ resource "ibm_code_engine_secret" "database_secret" {
     LANGFLOW_SECRET_KEY         = var.langflow_secret_key
     LANGFLOW_SUPERUSER          = var.langflow_superuser
     LANGFLOW_SUPERUSER_PASSWORD = var.langflow_superuser_password
+    ASTRA_DB_APPLICATION_TOKEN  = var.astra_db_application_token
   }
 
   depends_on = [data.ibm_database_connection.postgresql_connection]
