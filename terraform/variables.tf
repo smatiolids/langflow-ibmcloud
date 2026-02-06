@@ -146,6 +146,60 @@ variable "backend_health_check_path" {
   default     = "/health_check"
 }
 
+variable "cos_instance_name" {
+  description = "Name of the Cloud Object Storage instance for shared app data"
+  type        = string
+  default     = "langflow-cos"
+}
+
+variable "cos_plan" {
+  description = "Cloud Object Storage plan (standard or lite)"
+  type        = string
+  default     = "standard"
+}
+
+variable "cos_location" {
+  description = "Cloud Object Storage instance location (global is recommended)"
+  type        = string
+  default     = "global"
+}
+
+variable "cos_bucket_prefix" {
+  description = "Prefix used to build a unique COS bucket name"
+  type        = string
+  default     = "langflow-data"
+}
+
+variable "cos_bucket_name" {
+  description = "Optional explicit COS bucket name (must be globally unique). Leave empty to auto-generate."
+  type        = string
+  default     = ""
+}
+
+variable "cos_bucket_region" {
+  description = "Region location for the COS bucket"
+  type        = string
+  default     = ""
+}
+
+variable "cos_storage_class" {
+  description = "COS bucket storage class (standard, vault, cold, or smart)"
+  type        = string
+  default     = "standard"
+}
+
+variable "cos_pds_name" {
+  description = "Code Engine persistent data store name"
+  type        = string
+  default     = "langflow-data"
+}
+
+variable "cos_mount_path" {
+  description = "Mount path for the persistent data store inside the container"
+  type        = string
+  default     = "/app/langflow"
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = list(string)

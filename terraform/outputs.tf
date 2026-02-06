@@ -47,6 +47,22 @@ output "backend_status" {
   value       = ibm_code_engine_app.backend.status
 }
 
+# Shared storage (COS-backed persistent data store)
+output "cos_bucket_name" {
+  description = "Cloud Object Storage bucket name for shared app data"
+  value       = local.cos_bucket_name
+}
+
+output "cos_pds_name" {
+  description = "Code Engine persistent data store name"
+  value       = var.cos_pds_name
+}
+
+output "cos_mount_path" {
+  description = "Mount path for the persistent data store inside the container"
+  value       = var.cos_mount_path
+}
+
 # Deployment Summary
 output "deployment_summary" {
   description = "Summary of deployed resources"

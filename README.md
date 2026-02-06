@@ -99,7 +99,16 @@ backend_max_scale    = 1
 
 ## 🎯 Deployment Steps
 
-### 1. Initialize Terraform
+
+### 1. Connect to IBM Cloud
+
+```bash
+ibmcloud login --sso
+ibmcloud target -g langflow-resources
+ibmcloud ce project select --name langflow-project
+```
+
+### 2. Initialize Terraform
 
 ```bash
 cd terraform
@@ -108,7 +117,7 @@ terraform init
 
 This downloads the IBM Cloud provider and initializes the working directory.
 
-### 2. Review the Deployment Plan
+### 3. Review the Deployment Plan
 
 ```bash
 terraform plan
@@ -116,7 +125,7 @@ terraform plan
 
 This shows what resources will be created without actually creating them.
 
-### 3. Deploy the Infrastructure
+### 4. Deploy the Infrastructure
 
 ```bash
 terraform apply

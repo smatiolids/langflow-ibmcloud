@@ -9,6 +9,39 @@ resource "ibm_code_engine_project" "langflow_project" {
   resource_group_id = ibm_resource_group.group.id
 }
 
+# COS bucket name suffix (used when cos_bucket_name is not set)
+resource "random_id" "cos_bucket_suffix" {
+  byte_length = 4
+}
+
+# Cloud Object Storage instance for shared app data
+resource "ibm_resource_instance" "cos" {
+  name              = var.cos_instance_name
+  service           = "cloud-object-storage"
+  plan              = var.cos_plan
+  location          = var.cos_location
+  resource_group_id = ibm_resource_group.group.id
+  tags              = var.tags
+}
+
+# COS bucket that backs the Code Engine persistent data store
+resource "ibm_cos_bucket" "langflow_bucket" {
+  bucket_name          = local.cos_bucket_name
+  resource_instance_id = ibm_resource_instance.cos.id
+  storage_class        = var.cos_storage_class
+  region_location      = local.cos_bucket_region
+}
+
+# HMAC credentials for Code Engine to access the COS bucket
+resource "ibm_resource_key" "cos_hmac" {
+  name                 = "${var.project_name}-cos-hmac"
+  role                 = "Writer"
+  resource_instance_id = ibm_resource_instance.cos.id
+  parameters = {
+    HMAC = true
+  }
+}
+
 # Wait for Code Engine project to be fully ready
 resource "time_sleep" "wait_for_project" {
   depends_on = [ibm_code_engine_project.langflow_project]
@@ -99,6 +132,26 @@ locals {
   postgres_url_final = var.database_url_override != "" ? var.database_url_override : local.postgres_url_with_sslmode
 }
 
+locals {
+  cos_bucket_name   = var.cos_bucket_name != "" ? var.cos_bucket_name : "${var.cos_bucket_prefix}-${random_id.cos_bucket_suffix.hex}"
+  cos_bucket_region = var.cos_bucket_region != "" ? var.cos_bucket_region : var.region
+  cos_hmac_keys = try(
+    jsondecode(ibm_resource_key.cos_hmac.credentials["cos_hmac_keys"]),
+    {}
+  )
+  cos_hmac_access_key_id = try(
+    ibm_resource_key.cos_hmac.credentials["cos_hmac_keys.access_key_id"],
+    local.cos_hmac_keys.access_key_id,
+    ""
+  )
+  cos_hmac_secret_access_key = try(
+    ibm_resource_key.cos_hmac.credentials["cos_hmac_keys.secret_access_key"],
+    local.cos_hmac_keys.secret_access_key,
+    ""
+  )
+  cos_hmac_secret_name        = "${var.project_name}-cos-hmac-secret"
+}
+
 # Code Engine Secret for Database Connection
 resource "ibm_code_engine_secret" "database_secret" {
   project_id = ibm_code_engine_project.langflow_project.project_id
@@ -135,7 +188,7 @@ resource "ibm_code_engine_app" "backend" {
   run_env_variables {
     type  = "literal"
     name  = "LANGFLOW_CONFIG_DIR"
-    value = "/app/config"
+    value = var.cos_mount_path
   }
 
   run_env_variables {
@@ -183,6 +236,51 @@ resource "ibm_code_engine_app" "backend" {
   depends_on = [
     time_sleep.wait_for_project,
     ibm_code_engine_secret.database_secret
+  ]
+}
+
+# Create Code Engine persistent data store and mount it into the app
+resource "null_resource" "backend_persistent_data_store" {
+  triggers = {
+    project_name   = var.project_name
+    bucket_name    = local.cos_bucket_name
+    pds_name       = var.cos_pds_name
+    mount_path     = var.cos_mount_path
+    hmac_secret    = local.cos_hmac_secret_name
+    backend_app_id = ibm_code_engine_app.backend.id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -euo pipefail
+      ibmcloud ce project select --name ${var.project_name}
+
+      if [ -z "${local.cos_hmac_access_key_id}" ] || [ -z "${local.cos_hmac_secret_access_key}" ]; then
+        echo "Missing COS HMAC credentials. Ensure the COS service key includes HMAC keys." >&2
+        exit 1
+      fi
+
+      if ! ibmcloud ce secret get --name ${local.cos_hmac_secret_name} >/dev/null 2>&1; then
+        ibmcloud ce secret create --name ${local.cos_hmac_secret_name} --format hmac \
+          --access-key-id "${local.cos_hmac_access_key_id}" \
+          --secret-access-key "${local.cos_hmac_secret_access_key}"
+      fi
+
+      if ! ibmcloud ce persistentdatastore get --name ${var.cos_pds_name} >/dev/null 2>&1; then
+        ibmcloud ce persistentdatastore create --name ${var.cos_pds_name} \
+          --cos-bucket-name ${local.cos_bucket_name} \
+          --cos-access-secret ${local.cos_hmac_secret_name}
+      fi
+
+      ibmcloud ce application update --name ${ibm_code_engine_app.backend.name} \
+        --mount-data-store ${var.cos_mount_path}=${var.cos_pds_name}
+    EOT
+  }
+
+  depends_on = [
+    ibm_code_engine_app.backend,
+    ibm_resource_key.cos_hmac,
+    ibm_cos_bucket.langflow_bucket
   ]
 }
 

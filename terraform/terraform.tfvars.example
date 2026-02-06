@@ -43,5 +43,16 @@ database_disk_mb   = 5120  # 5 GB (minimum)
 # Application Ports
 backend_port = 7860
 
+# Cloud Object Storage (shared data store for Code Engine)
+cos_instance_name = "langflow-cos"
+cos_plan          = "standard"
+cos_location      = "global"
+cos_bucket_prefix = "langflow-data"
+cos_bucket_name   = ""
+cos_bucket_region = ""
+cos_storage_class = "standard"
+cos_pds_name      = "langflow-data"
+cos_mount_path    = "/app/langflow"
+
 # Tags
 tags = ["langflow", "terraform", "production"]
